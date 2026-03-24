@@ -4,19 +4,19 @@ import com.jobqueue.distributedjobqueue.model.Job;
 import jakarta.annotation.PostConstruct;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.concurrent.TimeUnit;
 
 @Component
 public class JobWorker {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final RedisTemplate<String, String> redisTemplate; // ✅ FIXED
     private final ObjectMapper objectMapper;
 
     private static final int MAX_RETRY = 3;
 
-    public JobWorker(RedisTemplate<String, Object> redisTemplate) {
+    public JobWorker(RedisTemplate<String, String> redisTemplate) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = new ObjectMapper();
     }
@@ -26,31 +26,26 @@ public class JobWorker {
         new Thread(() -> {
             while (true) {
                 try {
-                    // 🔥 Blocking pop (wait max 5 seconds)
-                    Object jobData = redisTemplate.opsForList()
+                    String jobJson = redisTemplate.opsForList()
                             .rightPop("jobQueue", 5, TimeUnit.SECONDS);
 
-                    if (jobData != null) {
+                    if (jobJson != null) {
 
-                        String jobJson = (String) jobData;
-
-                        // 🔥 Convert JSON → Job object
                         Job job = objectMapper.readValue(jobJson, Job.class);
 
                         System.out.println("Processing job: " + job);
 
                         try {
-                            // 🔥 Simulate random failure
+                            // Simulate failure
                             if (Math.random() < 0.5) {
                                 throw new RuntimeException("Simulated failure");
                             }
 
-                            // ✅ SUCCESS CASE
+                            // ✅ SUCCESS
                             job.setStatus("COMPLETED");
 
                             String updatedJob = objectMapper.writeValueAsString(job);
 
-                            // 🔥 Update status in Redis
                             redisTemplate.opsForValue()
                                     .set("job:" + job.getId(), updatedJob);
 
@@ -62,17 +57,15 @@ public class JobWorker {
 
                             if (retry < MAX_RETRY) {
 
-                                // 🔁 RETRY CASE
+                                // 🔁 RETRY
                                 job.setRetryCount(retry + 1);
                                 job.setStatus("RETRYING");
 
                                 String updatedJob = objectMapper.writeValueAsString(job);
 
-                                // 🔥 Update status in Redis
                                 redisTemplate.opsForValue()
                                         .set("job:" + job.getId(), updatedJob);
 
-                                // 🔁 Push back to queue
                                 redisTemplate.opsForList()
                                         .leftPush("jobQueue", updatedJob);
 
@@ -80,16 +73,14 @@ public class JobWorker {
 
                             } else {
 
-                                // ☠️ DLQ CASE
+                                // ☠️ DLQ
                                 job.setStatus("FAILED");
 
                                 String failedJob = objectMapper.writeValueAsString(job);
 
-                                // 🔥 Update status in Redis
                                 redisTemplate.opsForValue()
                                         .set("job:" + job.getId(), failedJob);
 
-                                // 🔥 Move to Dead Letter Queue
                                 redisTemplate.opsForList()
                                         .leftPush("deadLetterQueue", failedJob);
 
@@ -99,7 +90,10 @@ public class JobWorker {
                     }
 
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    System.out.println("Worker error: " + e.getMessage());
+                    try {
+                        Thread.sleep(2000); // prevent spam
+                    } catch (InterruptedException ignored) {}
                 }
             }
         }).start();
