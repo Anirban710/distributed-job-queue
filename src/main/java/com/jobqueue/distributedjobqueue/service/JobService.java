@@ -3,17 +3,19 @@ package com.jobqueue.distributedjobqueue.service;
 import com.jobqueue.distributedjobqueue.model.Job;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.UUID;
 
 @Service
 public class JobService {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    // ✅ FIXED: use <String, String>
+    private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
 
-    public JobService(RedisTemplate<String, Object> redisTemplate) {
+    // ✅ FIXED constructor
+    public JobService(RedisTemplate<String, String> redisTemplate) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = new ObjectMapper();
     }
@@ -29,7 +31,7 @@ public class JobService {
             // Push to queue
             redisTemplate.opsForList().leftPush("jobQueue", jobJson);
 
-            // 🔥 Store job for tracking
+            // Store job for tracking
             redisTemplate.opsForValue().set("job:" + job.getId(), jobJson);
 
             Long size = redisTemplate.opsForList().size("jobQueue");
